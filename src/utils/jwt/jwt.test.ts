@@ -59,6 +59,56 @@ describe('isTokenHeader', () => {
 
     expect(JWT.isTokenHeader(invalidTokenHeader)).toBe(false)
   })
+
+  it('returns true for an RFC 9068 `at+jwt` TokenHeader', () => {
+    const validTokenHeader: JWT.TokenHeader = {
+      alg: AlgorithmTypes.HS256,
+      typ: 'at+jwt',
+    }
+
+    expect(JWT.isTokenHeader(validTokenHeader)).toBe(true)
+  })
+
+  it('returns true for an RFC 9068 `application/at+jwt` TokenHeader', () => {
+    const validTokenHeader: JWT.TokenHeader = {
+      alg: AlgorithmTypes.HS256,
+      typ: 'application/at+jwt',
+    }
+
+    expect(JWT.isTokenHeader(validTokenHeader)).toBe(true)
+  })
+
+  it('returns true for a case-insensitive `jwt` TokenHeader (RFC 7519 §5.1)', () => {
+    const lowercase: JWT.TokenHeader = { alg: AlgorithmTypes.HS256, typ: 'jwt' }
+    const uppercaseAtJwt: JWT.TokenHeader = { alg: AlgorithmTypes.HS256, typ: 'AT+JWT' }
+    const uppercaseAppAtJwt: JWT.TokenHeader = {
+      alg: AlgorithmTypes.HS256,
+      typ: 'application/AT+JWT',
+    }
+
+    expect(JWT.isTokenHeader(lowercase)).toBe(true)
+    expect(JWT.isTokenHeader(uppercaseAtJwt)).toBe(true)
+    expect(JWT.isTokenHeader(uppercaseAppAtJwt)).toBe(true)
+  })
+
+  it('returns false for an unrecognized typ value', () => {
+    const invalidTokenHeader = {
+      alg: AlgorithmTypes.HS256,
+      typ: 'foo',
+    }
+
+    expect(JWT.isTokenHeader(invalidTokenHeader)).toBe(false)
+  })
+
+  it('still rejects a header carrying `crit` even with a valid typ', () => {
+    const invalidTokenHeader = {
+      alg: AlgorithmTypes.HS256,
+      typ: 'at+jwt',
+      crit: ['exp'],
+    }
+
+    expect(JWT.isTokenHeader(invalidTokenHeader)).toBe(false)
+  })
 })
 
 describe('JWT', () => {
@@ -312,6 +362,24 @@ describe('JWT', () => {
     }
     expect(err).toEqual(new JwtTokenIssuedAt(now, iat))
     expect(authorized).toBeUndefined()
+  })
+
+  it('verifies an RFC 9068 `at+jwt` access token header (issue #5621)', async () => {
+    const secret = 'a-secret'
+    const encode = (s: string) => encodeBase64Url(utf8Encoder.encode(s).buffer).replace(/=/g, '')
+    const now = Math.floor(Date.now() / 1000)
+    const encodedHeader = encode('{"alg":"HS256","typ":"at+jwt"}')
+    const encodedPayload = encode(JSON.stringify({ sub: 'alice', exp: now + 3600 }))
+    const signingInput = `${encodedHeader}.${encodedPayload}`
+    const signatureBuffer = await signing(
+      secret,
+      AlgorithmTypes.HS256,
+      utf8Encoder.encode(signingInput)
+    )
+    const tok = `${signingInput}.${encodeBase64Url(signatureBuffer).replace(/=/g, '')}`
+
+    const payload = await JWT.verify(tok, secret, AlgorithmTypes.HS256)
+    expect(payload.sub).toBe('alice')
   })
 
   describe('JwtTokenIssuedAt with malformed iat claim', () => {
